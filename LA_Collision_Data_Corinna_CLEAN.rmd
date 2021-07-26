@@ -1,0 +1,366 @@
+---
+title: "LA Collision_Corinna_Clean"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(wesanderson)
+library(viridis)
+library(lubridate)
+library(plyr)
+library(zoo)
+library(reshape2)
+library(cowplot)
+library(readxl)
+```
+
+
+```{r}
+LACollision <- read.csv(file="C:/Users/corin/Downloads/los-angeles-traffic-collision-data/LAdata.csv", header=TRUE, sep=",")
+```
+
+
+```{r}
+#Section: neighborhoods and collision count
+
+#Looks at total collision counts by neighborhood
+
+Areas <- unique(LACollision$Area.Name)
+AreaCounts <- tabulate(LACollision$Area.Name)
+CollisionsByNeighborhood <- data.frame(Areas, AreaCounts)
+CollisionsByNeighborhood[order(-AreaCounts),]
+
+ggplot(data = CollisionsByNeighborhood, mapping = aes(x = Areas, y = AreaCounts)) +
+  geom_bar(stat="identity", fill='#3D9262') +
+  xlab("Area") + ylab("Collision Count") +
+  coord_cartesian(ylim=c(10000, 30000)) +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+#Section: Age, Gender
+
+LACollision$Victim.Sex <- factor(LACollision$Victim.Sex, levels = c("M", "F"), labels = c("Male", "Female"))
+AgeGender <- data.frame(LACollision$Victim.Age, LACollision$Victim.Sex)
+AgeGender <- na.omit(AgeGender)
+
+#Creates a function into which neighborhoods can be plugged in and a density plot comparing age and sex is produced
+AgeGenderNbd <- function(x){
+  select <- subset(LACollision[order(LACollision$Victim.Age),], LACollision$Area.Name == (x), select = c("Area.Name", "Victim.Age", "Victim.Sex"))
+  select <- na.omit(select)
+  seelct <- filter(select, Victim.Age < 99)
+  print(head(select))
+  print(tail(select))
+  print(summary(select))
+  plot <- qplot(select$Victim.Age, data=select, geom="density", fill=select$Victim.Sex, alpha=I(.5), main="Distribution of Age", xlab="Victim Age", ylab="Density")
+  print(plot)
+}
+
+AgeGenderNbd("Olympic")
+AgeGenderNbd("Newton")
+
+#Produces a general age and gender plot
+allAgeGender <- na.omit(LACollision)
+allAgeGender <- filter(allAgeGender, Victim.Age < 99)
+all <- plot <- qplot(allAgeGender$Victim.Age, data=allAgeGender, geom="density", fill=allAgeGender$Victim.Sex, alpha=I(.5), main="Distribution of Age", xlab="Victim Age", ylab="Density")
+all
+
+```
+
+```{r}
+
+#Section: descent, age, and sex demographics
+
+LACollision$Victim.Descent <- factor(LACollision$Victim.Descent, levels = c("A", "B", "C", "D", "F", "G", "H", "I", "J", "K", "L", "O", "P", "S", "U", "V", "W", "X", "Z"), labels = c("Other-Asian", "Black", "Chinese", "Cambodian", "Filipino", "Guamanian", "Hispanic", "Native American/Alaskan Native", "Japanese", "Korean", "Laotian", "Other", "Pacific Islander", "Samoan", "Hawaiian", "Vietnamese", "White", "Unknown", "Asian Indian"))
+
+demoInfo <- data.frame(LACollision$Victim.Age, LACollision$Victim.Sex, LACollision$Victim.Descent, LACollision$Area.Name)
+demoInfo <- na.omit(demoInfo)
+
+biggurl <- tapply(demoInfo$LACollision.Victim.Age, demoInfo$LACollision.Area.Name, mean)
+bigboi <- table(demoInfo$LACollision.Victim.Descent, demoInfo$LACollision.Area.Name)
+bigboi <- as.data.frame(bigboi)
+
+pal <- wes_palette(name = "Zissou1", type = "continuous")
+
+#heatmap of descent and neighborhood information
+again <- ggplot(data = bigboi, aes(x = bigboi$Var2, y = bigboi$Var1)) +
+  geom_tile(aes(fill = bigboi$Freq)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_fill_gradientn(colours = pal) + 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) + 
+  coord_equal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank())
+again
+
+#scatterplot of descent and neighborhood information (uses the scatterplot function in a way that makes the changes in counts more impactful)
+again2 <- ggplot(data = bigboi, aes(x = bigboi$Var2, y = bigboi$Var1)) +
+  geom_point(aes(size = bigboi$Freq, colour = bigboi$Freq)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_colour_gradientn(colours = pal) + 
+  coord_equal() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank())
+again2
+
+#boxplot of neighbhorhood and age information
+demoInfo2 <- filter(demoInfo, demoInfo$LACollision.Victim.Age < 99)
+boxIt <- ggplot(data = demoInfo2, aes(x=demoInfo2$LACollision.Area.Name, y=demoInfo2$LACollision.Victim.Age), col = magma(21)) + geom_boxplot(aes(fill=demoInfo2$LACollision.Area.Name)) + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+boxIt
+
+```
+
+```{r}
+
+LACollision$Date.Occurred <- ymd_hms(LACollision$Date.Occurred)
+
+LAColl <- LACollision
+LAColl$month <- lubridate::month(LAColl$Date.Occurred, label = TRUE)
+LAColl$year <- year(LAColl$Date.Occurred)
+LAColl$wday <- lubridate::wday(LAColl$Date.Occurred, label = TRUE)
+
+col1 = "#d8e1cf" 
+col2 = "#438484"
+yearMonth <- ddply(LAColl, c( "year", "month" ), summarise, N = length(Date.Occurred))
+
+#reverse order of months for easier graphing
+yearMonth$month <- factor(yearMonth$month, levels=rev(levels(yearMonth$month)))
+print(yearMonth)
+
+
+yearMonth$yearAndmonth <- paste(yearMonth$month, yearMonth$year)
+yearMonth$yearAndmonth <- sort(yearMonth$yearAndmonth)
+yearMonth$yearAndmonth <- as.yearmon(paste(yearMonth$month, yearMonth$year), "%b %Y")
+yearMonth <- filter(yearMonth, yearMonth$year != 2019)
+
+#overall summary
+incidentTiles <- ggplot(yearMonth, aes(year, month)) + geom_tile(aes(fill = N),colour = "white") +
+  scale_fill_gradientn(colors=magma(20)) +  
+  guides(fill=guide_legend(title="Total Incidents")) +
+  labs(title = "Histogram of LA Incidents by Month and Year",
+       x = "Year", y = "Month") +
+  theme_bw() + theme_minimal() 
+incidentTiles
+
+#plots all time data with collision count
+incidentLines <- ggplot(data=yearMonth, aes(x=yearMonth$yearAndmonth, y=yearMonth$N, group=1)) + geom_line(stat = "identity") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +labs(title = "LA Incidents by Month and Year", x = "Month and Year", y = "Total Incidents") + scale_x_yearmon(format = "%b %Y", n = 12)
+incidentLines
+
+#plots time and collision count for 2018 only
+eighteen <- filter(yearMonth, yearMonth$year == 2018)
+eighteenLine <- ggplot(data=eighteen, aes(yearAndmonth, y=eighteen$N, group=1)) + geom_line(stat = "identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +labs(title = "LA Incidents in 2018", x = "Month and Year", y = "Total Incidents") + scale_x_yearmon()
+eighteenLine
+
+#plots collision count by day of the week
+perDay <- tapply(LAColl$wday, LAColl$wday, length)
+perDay <- as.data.frame(perDay)
+perDay$Day <- row.names(perDay) 
+perDay$Day <- sort(perDay$Day)
+
+perDayPlot <- ggplot(data= perDay, aes(x=Day, y=perDay, fill=Day)) + geom_bar(stat = "identity") + scale_fill_manual(values=wes_palette(n=7, name="BottleRocket1", type="continuous")) + theme(legend.position = "none") 
+perDayPlot
+
+```
+
+```{r}
+#Section: additional descent demographics
+
+byDescent <- count(LAColl, "Victim.Descent")
+byDescent$PercentofCollisions <- (byDescent$freq/479425)
+#byDescent$PercentofCollisions <- paste(round(byDescent$PercentofCollisions)*100,digits=1,"%", sep="")
+byDescent$PercentofLA <- c(.012, .089, .02, 0, .034, 0.0, .482, .015, .008, .028,0, .012, .001, .001, 0, .005, .284, 0, .009, 0 )
+
+byDescent
+df.D <- melt(byDescent[,c("Victim.Descent", "PercentofLA", "PercentofCollisions")], id.vars=1)
+df.D$PercentofLA <- sort(df.D$PercentofLA)
+df.D <- filter(df.D, df.D$Victim.Descent != "NA")
+df.D <- filter(df.D, df.D$Victim.Descent != "Pacific Islander")
+df.D <- filter(df.D, df.D$Victim.Descent != "Samoan")
+df.D <- filter(df.D, df.D$Victim.Descent != "Hawaiian")
+df.D <- filter(df.D, df.D$Victim.Descent != "Unknown")
+df.D <- filter(df.D, df.D$value > 0.0001)
+
+#looks at portion of all collisions each descent makes up as compared to their portion of the LA population
+plotDescent <- ggplot(df.D,aes(x = Victim.Descent,y = value)) + 
+    geom_bar(aes(fill = variable),stat = "identity",position = "dodge") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) #+ scale_y_continuous(labels=percent)
+plotDescent
+
+#https://censusreporter.org/profiles/16000US0644000-los-angeles-ca/
+#https://factfinder.census.gov/faces/tableservices/jsf/pages/productview.xhtml?src=CF
+```
+
+```{r}
+
+ageDist <- tapply(demoInfo$LACollision.Victim.Age, demoInfo$LACollision.Victim.Age, length)
+ageDist <- as.data.frame(ageDist)
+ageDist$Age <- row.names(ageDist) 
+ageDist$Age <- sort(ageDist$Age)
+ageDist <- filter(ageDist, Age < 98)
+ageDist <- filter(ageDist, ageDist > 0)
+ageDist
+
+#LM plot of age and collision count
+agePoint <- ggplot(data= ageDist, aes(x=Age, y=ageDist, group=1)) + geom_point(stat = "identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_x_discrete(breaks=seq(10, 96, 2)) + scale_y_continuous(breaks=seq(0,15000,1000)) + stat_smooth(method = "lm", col = "purple")
+agePoint
+
+ageDistRange <- ageDist
+ageDistRange$Age <- as.numeric(ageDistRange$Age)
+labs <- c(paste(seq(0, 95, by = 5), seq(0 + 5 - 1, 100 - 1, by = 5),
+                sep = "-"), paste(100, "+", sep = ""))
+ageDistRange$AgeGroup <- cut(ageDistRange$Age, breaks = c(seq(0, 100, by = 5), Inf), labels = labs, right = FALSE)
+ageDistRange
+
+#plots all age ranges with LM
+ageRangePoint <- ggplot(data= ageDistRange, aes(x=AgeGroup, y=ageDist,color=Age, group=1)) + geom_point(stat = "identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_continuous(breaks=seq(0,15000,1000)) + stat_smooth(method = "lm", col = "purple")
+ageRangePoint
+
+#all ages over 50
+ageOver <- filter(ageDistRange, Age < 50)
+ageOverLM <- lm(formula = ageDist ~ AgeGroup, data=ageOver)
+summary(ageOverLM)
+plot(ageOverLM)
+abline(ageOverLM)
+
+#women only over 50
+ageOverF <- table(LACollision$Victim.Sex, LACollision$Victim.Age)
+ageOverF <- as.data.frame(ageOverF)
+ageOverF$Var2 <- as.numeric(ageOverF$Var2)
+labs <- c(paste(seq(0, 95, by = 5), seq(0 + 5 - 1, 100 - 1, by = 5),
+                sep = "-"), paste(100, "+", sep = ""))
+ageOverF$AgeGroup <- cut(ageOverF$Var2, breaks = c(seq(0, 100, by = 5), Inf), labels = labs, right = FALSE)
+ageOverF <- filter(ageOverF, Var1 == "Female")
+ageOverF <- filter(ageOverF, Var2 > 50)
+
+ageOverFLM <- lm(formula=Freq ~ Var2, data=ageOverF)
+summary(ageOverFLM)
+plot(ageOverFLM)
+abline(ageOverFLM)
+
+femaleOverPlot <- ggplot(data= ageOverF, aes(x=Var2, y=Freq,color=AgeGroup, group=1)) + geom_point(stat = "identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_continuous(breaks=seq(0,15000,1000)) + stat_smooth(method = "lm", col = "purple")
+femaleOverPlot
+
+#women under 50
+ageUnderF <- table(LACollision$Victim.Sex, LACollision$Victim.Age)
+ageUnderF <- as.data.frame(ageUnderF)
+ageUnderF$Var2 <- as.numeric(ageUnderF$Var2)
+labs <- c(paste(seq(0, 95, by = 5), seq(0 + 5 - 1, 100 - 1, by = 5),
+                sep = "-"), paste(100, "+", sep = ""))
+ageUnderF$AgeGroup <- cut(ageUnderF$Var2, breaks = c(seq(0, 100, by = 5), Inf), labels = labs, right = FALSE)
+ageUnderF <- filter(ageUnderF, Var1 == "Female")
+ageUnderF <- filter(ageUnderF, Var2 < 50)
+ageUnderF <- filter(ageUnderF, Var2 > 10)
+
+ageUnderFLM <- lm(formula=Freq ~ Var2, data=ageUnderF)
+summary(ageUnderFLM)
+plot(ageUnderFLM)
+abline(ageUnderFLM)
+
+femaleUnderPlot <- ggplot(data= ageUnderF, aes(x=Var2, y=Freq,color=AgeGroup, group=1)) + geom_point(stat = "identity") + theme(axis.text.x = element_text(angle = 90, hjust = 1)) + scale_y_continuous(breaks=seq(0,15000,1000)) + stat_smooth(method = "lm", col = "purple")
+femaleUnderPlot
+
+#plot side by side
+plot_grid(femaleOverPlot, femaleUnderPlot, nrow = 1, ncol = 2, labels = "AUTO")
+```
+
+```{r}
+#creates a line plot collisions and years, grouped by age ranges
+labs <- c(paste(seq(0, 95, by = 5), seq(0 + 5 - 1, 100 - 1, by = 5),
+                sep = "-"), paste(100, "+", sep = ""))
+LAColl$AgeGroup <- cut(LAColl$Victim.Age, breaks = c(seq(0, 100, by = 5), Inf), labels = labs, right = FALSE)
+
+allAges <- table(LAColl$year, LAColl$AgeGroup)
+allAges <- as.data.frame(allAges)
+allAges <- filter(allAges, Freq > 0)
+allAges <- filter(allAges, Var1 != "2019")
+allAges
+
+allAgesPlot <- ggplot(allAges, aes(x = Var1, y = Freq, group=Var2)) + 
+  geom_line(aes(color = Var2)) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+allAgesPlot
+
+```
+
+```{r}
+
+accidentLM <- lm(formula=N ~ year, data=yearMonth)
+test <- data.frame(year = 2020)
+predicting <- predict(accidentLM, test, type = "response")
+test2 <- data.frame(year = 2030)
+predicting2 <- predict(accidentLM, test2, type = "response")
+predicting2
+summary(accidentLM)
+
+accidentLMMonth <- lm(formula=N~ year + month, data=yearMonth)
+summary(accidentLMMonth)
+
+accidentPlot <- ggplot(yearMonth, aes(x=yearAndmonth, y=N)) + geom_point() + stat_smooth(method = "lm", col = "purple")
+accidentPlot
+
+accidentPlot <- accidentPlot + geom_point(aes(x=2020, y=predicting),color="red", size=3) + geom_point(aes(x=2030, y=predicting2),color="red", size=3)
+accidentPlot
+
+```
+
+```{r}
+#http://isotp.metro.net/MetroRidership/YearOverYear.aspx
+
+LAmetro <- read_excel("C:/Users/corin/Downloads/LAMetroRidership.xlsx")
+LAmetro$riders <- as.numeric(LAmetro$riders)
+LAmetro$monthyear <- as.yearmon(paste(LAmetro$month, LAmetro$year), "%b %Y")
+
+p.Max <- (max(LAmetro$riders))
+p.Min <- min(LAmetro$riders)
+p.Change <- (p.Max - p.Min)/p.Max
+p.Change
+
+p.Begin <- LAmetro[1,4]
+p.End <- LAmetro[108,4]
+p.Change <- ((p.End - p.Begin)/p.Begin)*100
+p.ChangeLabel <- c('Percent Change : ','\n', p.Change)
+
+publicPlot <- ggplot(LAmetro, aes(x=monthyear, y=riders)) + geom_line() + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +labs(title = "LA Public Transportation Ridership by Month and Year", x = "Month and Year", y = "Total Riders") + scale_x_yearmon(format = "%b %Y", n = 12) + annotate("text", x=max(LAmetro$monthyear), y=max(LAmetro$riders), label = p.Change, hjust=1)
+publicPlot
+
+i.Begin <- yearMonth[1,3]
+i.End <- yearMonth[108,3]
+i.Change <- ((i.End - i.Begin)/i.Begin)*100
+i.Change
+
+incidentChange <- incidentLines + annotate("text", x=max(yearMonth$yearAndmonth), y=max(yearMonth$N), label = i.Change, hjust=1) + geom_point()
+
+publicCar <- plot_grid(publicPlot, incidentChange, ncol = 1,align = 'v', axis = 'l')
+publicCar
+```
+
+```{r}
+
+addPublic <- merge(yearMonth, LAmetro, by.x = "yearAndmonth", by.y = "monthyear")
+addPublic 
+
+addPubliclm <- lm(formula=N ~ yearAndmonth + riders, data=addPublic)
+addPubliclm
+summary(addPubliclm)
+plot(addPubliclm)
+abline(addPubliclm)
+
+agePublic <- table(LAColl$AgeGroup, LAColl$month, LAColl$year)
+agePublic <- as.data.frame(agePublic)
+agePublic$monthyear <- as.yearmon(paste(agePublic$Var2, agePublic$Var3), "%b %Y")
+agePublic <- merge(agePublic, LAmetro, by.x = "monthyear", by.y="monthyear")
+
+agePublicLM <- lm(formula = Freq ~ Var1 + riders, data=agePublic)
+summary(agePublicLM)
+
+plot.AO <- ggplot(agePublic, aes(x=Var1, y=Freq, color=riders)) + geom_point() + stat_smooth(method = "lm") +scale_color_gradientn(colors = wes_palette(n=3, name="GrandBudapest1"))+ theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +labs(title = "Riders Compared to Collisions", x = "Age Group", y = "Total Collisions")
+plot.AO
+  
+```
+

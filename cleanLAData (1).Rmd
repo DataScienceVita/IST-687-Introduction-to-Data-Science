@@ -1,0 +1,123 @@
+---
+title: "cleanLAData"
+author: "Saul Villarreal"
+date: "08/04/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+library(data.table)
+library(lubridate)
+library(jsonlite)
+library(rjson)
+library(plyr)
+library(chron)
+library(dplyr)
+
+#\\Mac\Home\Documents\IST 687 Applied Data Science\Project
+
+#make sure you have this .rmd file in the same directory as where you 
+#save our csv file
+rawFile <- fread("traffic-collision-data-from-2010-to-present.csv")
+
+#change date occurred, time occurred, and date reported to date formats
+rawFile$dateOccured <- rawFile$`Date Occurred`
+rawFile$dateOccured <- gsub(x=rawFile$`Date Occurred`,pattern="T00:00:00.000",replacement="",fixed=TRUE)
+rawFile$dateReported <- rawFile$`Date Reported`
+rawFile$dateReported <- gsub(x=rawFile$`Date Reported`,pattern="T00:00:00.000",replacement="",fixed=TRUE)
+rawFile$timeOccurred <- rawFile$`Time Occurred`
+lengthRow <- length(rawFile$dateOccured)
+rawFile$timeOccurred<- sub("([[:digit:]]{2,2})$", ":\\1", rawFile$timeOccurred) 
+rawFile$dateTimeOccurred <- as.POSIXct(paste(rawFile$dateOccured, rawFile$timeOccurred), format="%Y-%m-%d %H:%M") 
+# this dateTimeOccured wasn't too useful because you couldn't do calculations 
+# with it, if we want to look at time of day, we can use the hours as group
+# type in one of the applies
+
+rawFile1 <- rawFile[,-2:-4] # remove orignal dates that are not useful
+rawFile2<- rawFile1[, c(1,22,24,23,2:21)] #rearrange new columns to beginning of table
+
+# create function to be able to read JSON Location array
+storeJSONTxt <- function(jsonText){
+store1 <- fromJSON(chartr("\'\"","\"\'",jsonText))
+return(store1)
+}
+
+# create emtpy dataframe to store results
+df <- data.frame (matrix(NA, nrow=length(rawFile2$Location) , ncol=2))
+# used lapply to apply function to Location coordinates as the function
+# returns a list
+df1 <- lapply(rawFile2$Location, storeJSONTxt)
+
+#change list to numeric and delete data that is empty
+df <- data.frame(matrix(unlist(df1), nrow=length(rawFile2$Location), byrow=T),stringsAsFactors=FALSE)
+df <- df[,-3]
+df <- as.data.frame(sapply(df, as.numeric))
+
+#add longitude and latitude to original table
+rawFile2$latitude <- df$X1
+rawFile2$longitude <- df$X2
+
+#df[[1000]][[2]]
+
+### add additional time of day information from LA Collission Data RMD
+
+rawFile2$month <- month(rawFile2$dateOccured, label = TRUE)
+rawFile2$year <- year(rawFile2$dateOccured)
+rawFile2$wday <- wday(rawFile2$dateOccured, label = TRUE)
+
+tt <- strptime(paste("2001-01-01", rawFile2$timeOccurred), format="%Y-%m-%d %H:%M")
+tt1 <- format(round(tt, units="hours"), format="%H:%M:%S")
+
+rawFile2$timeOccurredNearestHour <- lapply(tt1, function(x) {as.numeric(times(x))*24})
+rawFile2$timeOccurredNearestHour <- as.numeric(rawFile2$timeOccurredNearestHour)
+# less than about 3% of our data might be a bit skewed as hour 23:31 to 0:59 are zeroes
+rawFile2$timeOccurredNearestHour[is.na(rawFile2$timeOccurredNearestHour)] <- 0
+
+
+#added useful category for plots, etc. 
+yearMonth <- ddply(rawFile2, c( "year", "month" ), summarise, N = length(dateOccured))
+
+#reverse order of months for easier graphing
+yearMonth$month <- factor(yearMonth$month, levels=rev(levels(yearMonth$month)))
+
+#added climate data
+
+climateData <- fread("1827343.csv")
+
+# i did not include type of data because a lot of empty data
+# i also did not include max sustained windspeed per seconds
+# wind speed data is in meters per second
+climateTest <- data.frame (climateData$DATE, climateData$AWND, climateData$PRCP, climateData$TMAX, climateData$TMIN, (climateData$TMAX+climateData$TMIN)/2)
+names(climateTest) <- c("dateOccured", "averageWindSpeed", "precipitation", "tempMax",
+                        "tempMin", "tempAvg")
+
+rawFile2 <- left_join( climateTest, rawFile2, by=c("dateOccured"))
+#451491, 478448
+
+rawFile2 <- rawFile2[-451491:-478448,]
+rawFile2<- rawFile2[, c(1,32:35,2:31)]
+
+str(rawFile2)
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
